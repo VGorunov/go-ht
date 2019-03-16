@@ -12,10 +12,10 @@ import (
 )
 
 type OutputResult struct {
-	totalTimeReq    int64
-	averageTimeReq  int64
-	maxResponseTime int64
-	minResponseTime int64
+	totalTimeReq    int
+	averageTimeReq  int
+	maxResponseTime int
+	minResponseTime int
 	countMissResp   int
 }
 
@@ -29,9 +29,7 @@ func sendReq() (out OutputResult, err error) {
 	parameters := initParameters()
 	var mutex sync.Mutex
 	var wg sync.WaitGroup
-	var totalReqTime int64
-	var countReq int64
-	var allTimeResp []int64
+	var allTimeReq []int
 	var countMissResp int
 
 	for i := 0; i < parameters.countOfReq; i++ {
@@ -43,40 +41,51 @@ func sendReq() (out OutputResult, err error) {
 				Timeout: time.Duration(parameters.timeOut),
 			}
 			_, err := client.Get(parameters.url)
-			checkErr(err)
 
-			timeReq := time.Since(start).Nanoseconds()
-			mutex.Lock()
+			timeReq := int(time.Since(start).Nanoseconds())
+
 			if err, ok := err.(net.Error); ok && err.Timeout() {
+				mutex.Lock()
 				countMissResp++
+				mutex.Unlock()
 			} else if err != nil {
-				return
+				checkErr(err)
 			} else {
-				totalReqTime += timeReq
-				countReq++
+				mutex.Lock()
+				allTimeReq = append(allTimeReq, timeReq)
+				mutex.Unlock()
 			}
-			allTimeResp = append(allTimeResp, timeReq)
-			mutex.Unlock()
 		}()
 	}
 	wg.Wait()
 
-	if countReq == 0 {
+	if len(allTimeReq) == 0 {
 		return out, errors.New("all requests failed")
 	}
 
-	out = OutputResult{totalReqTime, totalReqTime / countReq,
-		getMaxTimeResp(allTimeResp), getMinTimeResp(allTimeResp), countMissResp}
+	minTime := allTimeReq[0]
+	maxTime := allTimeReq[0]
+	calculateMaxMinTimeResp(allTimeReq, &maxTime, &minTime)
+
+	totalReqTime := calculateTotalReq(allTimeReq)
+	averageTimeReq := totalReqTime / len(allTimeReq)
+	out = OutputResult{totalReqTime, averageTimeReq,
+		maxTime, minTime, countMissResp}
+	return
+}
+
+func calculateTotalReq(allTimeResp []int) (totalReq int) {
+	for _, el := range allTimeResp {
+		totalReq += el
+	}
 	return
 }
 
 func initParameters() InputParameters {
-	urlFlag := flag.String("url", "", "url")
-	countOfReqFlag := flag.String("count", "", "count of request")
-	timeOutFlag := flag.String("timeOut", "", "timeOut")
+	urlFlag := flag.String("url", "https://www.google.com/", "url")
+	countOfReqFlag := flag.String("count", "1", "count of request")
+	timeOutFlag := flag.String("timeOut", "500000000", "timeOut")
 	flag.Parse()
-
-	checkParameters(*urlFlag, *countOfReqFlag, *timeOutFlag)
 
 	url := *urlFlag
 	countOfReq, err := strconv.Atoi(*countOfReqFlag)
@@ -87,34 +96,14 @@ func initParameters() InputParameters {
 	return InputParameters{url: url, countOfReq: countOfReq, timeOut: timeOut}
 }
 
-func checkParameters(url, countOfReq, timeOut string) {
-	if url == "" {
-		panic("-url flag has to be specified")
-	} else if countOfReq == "" {
-		panic("-count flag has to be specified")
-	} else if timeOut == "" {
-		panic("-timeOut flag has to be specified")
-	}
-
-}
-
-func getMaxTimeResp(allTimeResp []int64) (maxTimeResp int64) {
+func calculateMaxMinTimeResp(allTimeResp []int, max, min *int) {
 	for i := 0; i < len(allTimeResp); i++ {
-		if allTimeResp[i] > maxTimeResp {
-			maxTimeResp = allTimeResp[i]
+		if allTimeResp[i] < *min {
+			*min = allTimeResp[i]
+		} else if allTimeResp[i] > *max {
+			*max = allTimeResp[i]
 		}
 	}
-	return
-}
-
-func getMinTimeResp(allTimeResp []int64) (minTimeResp int64) {
-	minTimeResp = allTimeResp[0]
-	for i := 0; i < len(allTimeResp); i++ {
-		if allTimeResp[i] < minTimeResp {
-			minTimeResp = allTimeResp[i]
-		}
-	}
-	return
 }
 
 func checkErr(err error) {
@@ -123,16 +112,18 @@ func checkErr(err error) {
 	}
 }
 
-func printRespInConsole(response OutputResult) {
-	fmt.Println("Time during which all requests worked:", response.totalTimeReq)
-	fmt.Println("Average request time:", response.averageTimeReq)
-	fmt.Println("Maximum response time:", response.maxResponseTime)
-	fmt.Println("Minimum response time:", response.minResponseTime)
-	fmt.Println("Number of missed responses:", response.countMissResp)
+func (response OutputResult) String() string {
+	return fmt.Sprintf("Time during which all requests worked: %d\n"+
+		"Average request time: %d\n"+
+		"Maximum response time: %d\n"+
+		"Minimum response time: %d\n"+
+		"Number of missed responses: %d",
+		response.totalTimeReq, response.averageTimeReq,
+		response.maxResponseTime, response.minResponseTime, response.countMissResp)
 }
 
 func main() {
 	response, err := sendReq()
-	printRespInConsole(response)
+	fmt.Println(response)
 	checkErr(err)
 }
