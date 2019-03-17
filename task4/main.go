@@ -11,6 +11,18 @@ import (
 	"time"
 )
 
+var (
+	url        string
+	countOfReq int
+	timeOut    int
+)
+
+const (
+	urlDefault     = "https://www.google.com/"
+	countDefault   = 1
+	timeOutDefault = 500000000
+)
+
 type OutputResult struct {
 	totalTimeReq    int
 	averageTimeReq  int
@@ -19,28 +31,21 @@ type OutputResult struct {
 	countMissResp   int
 }
 
-type InputParameters struct {
-	url        string
-	countOfReq int
-	timeOut    int
-}
-
 func sendReq() (out OutputResult, err error) {
-	parameters := initParameters()
 	var mutex sync.Mutex
-	var wg sync.WaitGroup
+	var myWg sync.WaitGroup
 	var allTimeReq []int
 	var countMissResp int
 
-	for i := 0; i < parameters.countOfReq; i++ {
-		wg.Add(1)
-		go func() {
+	for i := 0; i < countOfReq; i++ {
+		myWg.Add(1)
+		go func(wg *sync.WaitGroup) {
 			defer wg.Done()
 			start := time.Now()
 			client := http.Client{
-				Timeout: time.Duration(parameters.timeOut),
+				Timeout: time.Duration(timeOut),
 			}
-			_, err := client.Get(parameters.url)
+			_, err := client.Get(url)
 
 			timeReq := int(time.Since(start).Nanoseconds())
 
@@ -49,15 +54,15 @@ func sendReq() (out OutputResult, err error) {
 				countMissResp++
 				mutex.Unlock()
 			} else if err != nil {
-				checkErr(err)
+				panic(err)
 			} else {
 				mutex.Lock()
 				allTimeReq = append(allTimeReq, timeReq)
 				mutex.Unlock()
 			}
-		}()
+		}(&myWg)
 	}
-	wg.Wait()
+	myWg.Wait()
 
 	if len(allTimeReq) == 0 {
 		return out, errors.New("all requests failed")
@@ -81,19 +86,24 @@ func calculateTotalReq(allTimeResp []int) (totalReq int) {
 	return
 }
 
-func initParameters() InputParameters {
-	urlFlag := flag.String("url", "https://www.google.com/", "url")
-	countOfReqFlag := flag.String("count", "1", "count of request")
-	timeOutFlag := flag.String("timeOut", "500000000", "timeOut")
+func init() {
+	url = *flag.String("url", urlDefault, "url")
+	countOfReqFlag := flag.String("count", string(countDefault), "count of request")
+	timeOutFlag := flag.String("timeOut", string(timeOutDefault), "timeOut")
 	flag.Parse()
 
-	url := *urlFlag
-	countOfReq, err := strconv.Atoi(*countOfReqFlag)
-	checkErr(err)
-	timeOut, err := strconv.Atoi(*timeOutFlag)
-	checkErr(err)
+	var err error
+	countOfReq, err = strconv.Atoi(*countOfReqFlag)
+	if err != nil {
+		fmt.Printf("parameter countOfReq contain an error, using default value = %d\n", countDefault)
+		countOfReq = countDefault
+	}
 
-	return InputParameters{url: url, countOfReq: countOfReq, timeOut: timeOut}
+	timeOut, err = strconv.Atoi(*timeOutFlag)
+	if err != nil {
+		fmt.Printf("parameter timeOut contain an error, using default value = %d\n", timeOutDefault)
+		timeOut = timeOutDefault
+	}
 }
 
 func calculateMaxMinTimeResp(allTimeResp []int, max, min *int) {
@@ -103,12 +113,6 @@ func calculateMaxMinTimeResp(allTimeResp []int, max, min *int) {
 		} else if allTimeResp[i] > *max {
 			*max = allTimeResp[i]
 		}
-	}
-}
-
-func checkErr(err error) {
-	if err != nil {
-		panic(err)
 	}
 }
 
@@ -124,6 +128,8 @@ func (response OutputResult) String() string {
 
 func main() {
 	response, err := sendReq()
+	if err != nil {
+		panic(err)
+	}
 	fmt.Println(response)
-	checkErr(err)
 }
